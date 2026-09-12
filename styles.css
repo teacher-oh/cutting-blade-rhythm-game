@@ -1,0 +1,10 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #050914; }
+body { display: grid; place-items: center; font-family: system-ui, sans-serif; }
+#game { width: 100vw; height: 100vh; min-height: 360px; position: relative; overflow: hidden; background: #071126; }
+.game-world { position: absolute; inset: 0; overflow: hidden; }
+.background-layer { position: absolute; inset: 0; background-image: url('./assets/castle-bg.jpg'); background-position: center bottom; background-repeat: no-repeat; background-size: cover; transform: scale(1.01); }
+#actors-layer, #effects-layer, #occlusion-layer { position: absolute; inset: 0; pointer-events: none; }
+/* The game world uses a fixed 16:9 composition; this makes the artwork scale cleanly. */
+@media (min-aspect-ratio: 16/9) { .background-layer { background-size: 100% auto; } }
+@media (max-aspect-ratio: 16/9) { .background-layer { background-size: auto 100%; } }
