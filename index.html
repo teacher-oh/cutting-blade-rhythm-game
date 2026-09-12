@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cutting Blade Rhythm</title>
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main id="game" aria-label="게임 화면">
+    <div class="game-world">
+      <!-- 실제 게임 배경: assets/castle-bg.jpg -->
+      <div class="background-layer" aria-hidden="true"></div>
+
+      <!-- 나중에 기사/적/맵 오브젝트가 들어갈 영역 -->
+      <div id="actors-layer"></div>
+      <div id="effects-layer"></div>
+
+      <!-- 전경 가림막/벽을 나중에 별도 오브젝트로 배치할 수 있는 레이어 -->
+      <div id="occlusion-layer" aria-hidden="true"></div>
+    </div>
+  </main>
+  <script src="./game.js"></script>
+</body>
+</html>
