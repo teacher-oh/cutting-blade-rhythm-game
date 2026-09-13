@@ -37,9 +37,8 @@ actorsLayer.appendChild(knight);
 const ctx = knightCanvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
 
-// The supplied sheet is 1024x682: 8 columns, 3 animation rows.
-// Row 0 = natural side-view walk cycle, row 1 = front, row 2 = back.
-const SHEET_URL = './knight-sheet.png?v=9';
+// 8 columns x 3 visible animation rows.
+const SHEET_URL = './knight-sheet.png?v=10';
 const SHEET_W = 1024;
 const SHEET_H = 682;
 const COLS = 8;
@@ -47,7 +46,10 @@ const ROWS = 3;
 const CELL_W = SHEET_W / COLS;
 const CELL_H = SHEET_H / ROWS;
 const WALK_FRAMES = 8;
-const WALK_FRAME_TIME = 0.085;
+
+// Slightly slower than the previous version so each step reads clearly,
+// while still looping smoothly.
+const WALK_FRAME_TIME = 0.105;
 const IDLE_FRAME = 0;
 const GROUND_Y = 0.947;
 
@@ -72,7 +74,6 @@ const DECELERATION = 10.0;
 const keys = new Set();
 
 let sheetReady = false;
-let processedSheet = null;
 let normalizedFrames = [];
 
 function approach(current, target, amount) {
@@ -91,9 +92,10 @@ function loadImage(url) {
   });
 }
 
-// The uploaded illustration contains a checkerboard baked into the PNG.
-// Build a tiny repeating background template from the empty outer border,
-// then turn matching neutral pixels into alpha=0. This keeps the knight pixels.
+// Remove ONLY the checkerboard/background connected to the outside edge.
+// This is much safer than deleting every gray pixel because the knight's
+// silver armor is also gray. Armor remains because it is enclosed by the
+// character outline instead of being connected to the sheet border.
 function removeCheckerboard(image) {
   const source = document.createElement('canvas');
   source.width = SHEET_W;
@@ -102,76 +104,72 @@ function removeCheckerboard(image) {
   sourceCtx.imageSmoothingEnabled = false;
   sourceCtx.drawImage(image, 0, 0, SHEET_W, SHEET_H);
 
-  const data = sourceCtx.getImageData(0, 0, SHEET_W, SHEET_H);
-  const pixels = data.data;
-  const period = 32;
-  const sums = new Float64Array(period * period);
-  const counts = new Uint32Array(period * period);
+  const imageData = sourceCtx.getImageData(0, 0, SHEET_W, SHEET_H);
+  const pixels = imageData.data;
+  const total = SHEET_W * SHEET_H;
+  const background = new Uint8Array(total);
+  const queue = new Int32Array(total);
+  let head = 0;
+  let tail = 0;
 
-  for (let y = 0; y < SHEET_H; y++) {
-    for (let x = 0; x < SHEET_W; x++) {
-      if (x >= 20 && x < SHEET_W - 20 && y >= 20 && y < SHEET_H - 20) continue;
-      const i = (y * SHEET_W + x) * 4;
-      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-      if (Math.max(r, g, b) - Math.min(r, g, b) <= 7) {
-        const bucket = (y % period) * period + (x % period);
-        sums[bucket] += (r + g + b) / 3;
-        counts[bucket]++;
-      }
+  function isBackgroundPixel(x, y) {
+    const i = (y * SHEET_W + x) * 4;
+    const r = pixels[i];
+    const g = pixels[i + 1];
+    const b = pixels[i + 2];
+    const a = pixels[i + 3];
+    if (a < 20) return true;
+
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    const saturation = max - min;
+    const brightness = (r + g + b) / 3;
+
+    // Checkerboard is neutral/light. Keep darker neutral knight outlines and
+    // blue colored pixels intact.
+    return saturation <= 12 && brightness >= 135;
+  }
+
+  function seed(x, y) {
+    const index = y * SHEET_W + x;
+    if (background[index] || !isBackgroundPixel(x, y)) return;
+    background[index] = 1;
+    queue[tail++] = index;
+  }
+
+  // Seed every edge pixel, then flood-fill all connected checkerboard areas.
+  for (let x = 0; x < SHEET_W; x++) {
+    seed(x, 0);
+    seed(x, SHEET_H - 1);
+  }
+  for (let y = 1; y < SHEET_H - 1; y++) {
+    seed(0, y);
+    seed(SHEET_W - 1, y);
+  }
+
+  while (head < tail) {
+    const index = queue[head++];
+    const x = index % SHEET_W;
+    const y = Math.floor(index / SHEET_W);
+
+    if (x > 0) seed(x - 1, y);
+    if (x + 1 < SHEET_W) seed(x + 1, y);
+    if (y > 0) seed(x, y - 1);
+    if (y + 1 < SHEET_H) seed(x, y + 1);
+  }
+
+  for (let index = 0; index < total; index++) {
+    if (background[index]) {
+      pixels[index * 4 + 3] = 0;
     }
   }
 
-  const template = new Float32Array(period * period);
-  for (let i = 0; i < template.length; i++) {
-    template[i] = counts[i] ? sums[i] / counts[i] : 190;
-  }
-
-  const foregroundSeed = new Uint8Array(SHEET_W * SHEET_H);
-  for (let y = 0; y < SHEET_H; y++) {
-    for (let x = 0; x < SHEET_W; x++) {
-      const i = (y * SHEET_W + x) * 4;
-      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-      const saturation = Math.max(r, g, b) - Math.min(r, g, b);
-      const luminance = 0.299 * r + 0.587 * g + 0.114 * b;
-      if (saturation > 22 || (luminance < 145 && saturation < 80)) {
-        foregroundSeed[y * SHEET_W + x] = 1;
-      }
-    }
-  }
-
-  // Preserve neutral armor pixels when they are close to a blue/dark knight pixel.
-  const radius = 9;
-  const output = new ImageData(new Uint8ClampedArray(pixels), SHEET_W, SHEET_H);
-  const out = output.data;
-
-  for (let y = 0; y < SHEET_H; y++) {
-    for (let x = 0; x < SHEET_W; x++) {
-      const i = (y * SHEET_W + x) * 4;
-      const r = pixels[i], g = pixels[i + 1], b = pixels[i + 2];
-      const neutral = Math.max(r, g, b) - Math.min(r, g, b) <= 14;
-      const expected = template[(y % period) * period + (x % period)];
-      const brightness = (r + g + b) / 3;
-      const looksLikeBoard = neutral && brightness > 150 && Math.abs(brightness - expected) < 13;
-
-      if (looksLikeBoard) {
-        let nearForeground = false;
-        for (let yy = Math.max(0, y - radius); yy <= Math.min(SHEET_H - 1, y + radius) && !nearForeground; yy++) {
-          for (let xx = Math.max(0, x - radius); xx <= Math.min(SHEET_W - 1, x + radius); xx++) {
-            if (foregroundSeed[yy * SHEET_W + xx]) {
-              nearForeground = true;
-              break;
-            }
-          }
-        }
-        if (!nearForeground) out[i + 3] = 0;
-      }
-    }
-  }
-
-  sourceCtx.putImageData(output, 0, 0);
+  sourceCtx.putImageData(imageData, 0, 0);
   return source;
 }
 
+// Normalize every walk frame to the same center and foot line.
+// This prevents the character from visibly bouncing when the sprite frame changes.
 function makeNormalizedFrames(source) {
   const frames = [];
   const sourceCtx = source.getContext('2d', { willReadFrequently: true });
@@ -185,7 +183,10 @@ function makeNormalizedFrames(source) {
     const imageData = sourceCtx.getImageData(sx, sy, sw, sh);
     const p = imageData.data;
 
-    let minX = sw, maxX = -1, maxY = -1;
+    let minX = sw;
+    let maxX = -1;
+    let maxY = -1;
+
     for (let y = 0; y < sh; y++) {
       for (let x = 0; x < sw; x++) {
         if (p[(y * sw + x) * 4 + 3] > 10) {
@@ -211,14 +212,15 @@ function makeNormalizedFrames(source) {
 
     frames.push(frameCanvas);
   }
+
   return frames;
 }
 
 async function prepareKnightSprite() {
   try {
     const image = await loadImage(SHEET_URL);
-    processedSheet = removeCheckerboard(image);
-    normalizedFrames = makeNormalizedFrames(processedSheet);
+    const transparentSheet = removeCheckerboard(image);
+    normalizedFrames = makeNormalizedFrames(transparentSheet);
     sheetReady = true;
     drawKnight();
   } catch (error) {
@@ -260,7 +262,7 @@ function updatePlayer(dt) {
       player.frameTimer -= WALK_FRAME_TIME;
       player.frame = (player.frame + 1) % WALK_FRAMES;
     }
-  } else if (player.state === 'idle') {
+  } else {
     player.frame = IDLE_FRAME;
     player.frameTimer = 0;
   }
@@ -317,7 +319,6 @@ window.addEventListener('keyup', event => {
 window.addEventListener('resize', drawKnight);
 
 prepareKnightSprite();
-
 drawKnight();
 
 let lastTime = performance.now();
