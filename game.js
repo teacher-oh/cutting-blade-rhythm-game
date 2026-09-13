@@ -4,7 +4,7 @@
 const world = document.querySelector('.game-world');
 const actorsLayer = document.querySelector('#actors-layer');
 
-// Knight is rendered above the background, at the bridge position marked in the reference screenshot.
+// Knight actor is rendered above the existing background.
 const actorCanvas = document.createElement('canvas');
 actorCanvas.id = 'knight-actor-canvas';
 Object.assign(actorCanvas.style, {
@@ -27,24 +27,39 @@ function resizeActorCanvas() {
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
 }
-
 window.addEventListener('resize', resizeActorCanvas);
 
+// The new knight sheet is the 1536x1024 sheet uploaded to the repository root.
+// It is arranged as 8 columns x 4 rows (the last row is unused/empty).
 const knightSheet = new Image();
 knightSheet.decoding = 'async';
-knightSheet.src = './assets/knight-sheet.png?v=4';
+knightSheet.src = './knight-sheet.png?v=6';
 
-const IDLE_FRAMES = [
-  {x:7,y:6,w:49,h:84},{x:69,y:6,w:53,h:84},{x:134,y:6,w:51,h:84},
-  {x:198,y:6,w:51,h:84},{x:263,y:6,w:49,h:84},{x:327,y:6,w:48,h:84}
-];
-const WALK_FRAMES = [
-  {x:4,y:102,w:56,h:85},{x:69,y:102,w:54,h:85},{x:132,y:102,w:55,h:85},{x:196,y:102,w:55,h:85},
-  {x:260,y:102,w:55,h:85},{x:325,y:102,w:53,h:85},{x:388,y:102,w:55,h:85},{x:452,y:102,w:55,h:85}
-];
+const CELL_W = 192;
+const CELL_H = 256;
+const SHEET_COLS = 8;
 
-// Reference screenshot: knight is on the left bridge, roughly x=26% and feet at 95% of viewport height.
+// Row 0: side-view movement frames. Used for A/D movement.
+const WALK_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
+  x: col * CELL_W, y: 0, w: CELL_W, h: CELL_H
+}));
+
+// Row 0 first pose is also a stable side-view idle pose.
+const IDLE_FRAME = { x: 0, y: 0, w: CELL_W, h: CELL_H };
+
+// Row 1: front-facing poses. Used during jumping so the character has a distinct
+// non-walking pose instead of freezing a walking frame.
+const JUMP_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
+  x: col * CELL_W, y: CELL_H, w: CELL_W, h: CELL_H
+}));
+
+// Row 2: back-facing poses. Kept ready for future 8-direction controls.
+const BACK_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
+  x: col * CELL_W, y: CELL_H * 2, w: CELL_W, h: CELL_H
+}));
+
 const player = {
+  // Starting position matches the bridge location from the reference screenshot.
   x: 0.26,
   y: 0.947,
   vx: 0,
@@ -65,11 +80,13 @@ const ACCELERATION = 7.5;
 const DECELERATION = 10.0;
 const WALK_FRAME_TIME = 0.095;
 const IDLE_FRAME_TIME = 0.22;
+const JUMP_FRAME_TIME = 0.12;
 const keys = new Set();
 
 window.addEventListener('keydown', event => {
-  if (['KeyA','KeyD','KeyW','Space'].includes(event.code)) event.preventDefault();
+  if (['KeyA', 'KeyD', 'KeyW', 'Space'].includes(event.code)) event.preventDefault();
   keys.add(event.code);
+
   if (event.code === 'KeyW' && !player.jumpLock) {
     player.jumpLock = true;
     if (player.onGround) {
@@ -81,6 +98,7 @@ window.addEventListener('keydown', event => {
     }
   }
 });
+
 window.addEventListener('keyup', event => {
   keys.delete(event.code);
   if (event.code === 'KeyW') player.jumpLock = false;
@@ -94,17 +112,20 @@ function approach(current, target, amount) {
 
 function updatePlayer(dt) {
   const input = (keys.has('KeyD') ? 1 : 0) - (keys.has('KeyA') ? 1 : 0);
+
   if (input) {
     player.direction = input;
     player.vx = approach(player.vx, input * WALK_SPEED, ACCELERATION * dt);
   } else {
     player.vx = approach(player.vx, 0, DECELERATION * dt);
   }
+
   player.x = Math.max(0.055, Math.min(0.945, player.x + player.vx * dt));
 
   if (!player.onGround) {
     player.vy += GRAVITY * dt;
     player.y += player.vy * dt;
+
     if (player.y >= GROUND_Y) {
       player.y = GROUND_Y;
       player.vy = 0;
@@ -120,13 +141,24 @@ function updatePlayer(dt) {
     player.state = Math.abs(player.vx) > 0.012 ? 'walk' : 'idle';
   }
 
-  if (player.state === 'jump' || player.state === 'fall') return;
-  const frames = player.state === 'walk' ? WALK_FRAMES : IDLE_FRAMES;
-  const frameTime = player.state === 'walk' ? WALK_FRAME_TIME : IDLE_FRAME_TIME;
-  player.frameTimer += dt;
-  while (player.frameTimer >= frameTime) {
-    player.frameTimer -= frameTime;
-    player.frame = (player.frame + 1) % frames.length;
+  if (player.state === 'walk') {
+    player.frameTimer += dt;
+    while (player.frameTimer >= WALK_FRAME_TIME) {
+      player.frameTimer -= WALK_FRAME_TIME;
+      player.frame = (player.frame + 1) % WALK_FRAMES.length;
+    }
+  } else if (player.state === 'idle') {
+    player.frameTimer += dt;
+    while (player.frameTimer >= IDLE_FRAME_TIME) {
+      player.frameTimer -= IDLE_FRAME_TIME;
+      player.frame = 0;
+    }
+  } else {
+    player.frameTimer += dt;
+    while (player.frameTimer >= JUMP_FRAME_TIME) {
+      player.frameTimer -= JUMP_FRAME_TIME;
+      player.frame = Math.min(player.frame + 1, JUMP_FRAMES.length - 1);
+    }
   }
 }
 
@@ -134,12 +166,17 @@ function drawKnight() {
   const width = world.clientWidth;
   const height = world.clientHeight;
   if (!width || !height) return;
+
   ctx.clearRect(0, 0, width, height);
   if (!knightSheet.complete || !knightSheet.naturalWidth) return;
 
-  const frames = player.state === 'walk' ? WALK_FRAMES : IDLE_FRAMES;
-  const frame = frames[player.frame % frames.length];
-  const targetHeight = Math.max(120, Math.min(175, height * 0.18));
+  let frame;
+  if (player.state === 'walk') frame = WALK_FRAMES[player.frame % WALK_FRAMES.length];
+  else if (player.state === 'jump' || player.state === 'fall') frame = JUMP_FRAMES[player.frame % JUMP_FRAMES.length];
+  else frame = IDLE_FRAME;
+
+  // The artwork occupies most of each 192x256 cell. Keep the foot anchor stable.
+  const targetHeight = Math.max(150, Math.min(205, height * 0.22));
   const scale = targetHeight / frame.h;
   const dw = frame.w * scale;
   const dh = frame.h * scale;
@@ -148,6 +185,7 @@ function drawKnight() {
 
   ctx.save();
   ctx.imageSmoothingEnabled = false;
+
   if (player.direction < 0) {
     ctx.translate(dx + dw, 0);
     ctx.scale(-1, 1);
@@ -155,6 +193,7 @@ function drawKnight() {
   } else {
     ctx.drawImage(knightSheet, frame.x, frame.y, frame.w, frame.h, dx, dy, dw, dh);
   }
+
   ctx.restore();
 }
 
