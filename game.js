@@ -1,14 +1,8 @@
 // CUTTING RHYTHM - Knight movement prototype
-// The existing background layer is intentionally left untouched.
+// Existing background code is intentionally left untouched.
 
 const world = document.querySelector('.game-world');
 const actorsLayer = document.querySelector('#actors-layer');
-
-function resizeWorld() {
-  world.style.aspectRatio = '16 / 9';
-  resizeActorCanvas();
-}
-window.addEventListener('resize', resizeWorld);
 
 // --------------------------------------------------
 // Knight actor canvas
@@ -18,12 +12,16 @@ actorCanvas.id = 'knight-actor-canvas';
 actorCanvas.setAttribute('aria-hidden', 'true');
 Object.assign(actorCanvas.style, {
   position: 'absolute',
-  inset: '0',
+  left: '0',
+  top: '0',
   width: '100%',
   height: '100%',
+  display: 'block',
   pointerEvents: 'none',
-  imageRendering: 'pixelated'
+  imageRendering: 'pixelated',
+  zIndex: '10'
 });
+actorsLayer.style.zIndex = '10';
 actorsLayer.appendChild(actorCanvas);
 
 const ctx = actorCanvas.getContext('2d');
@@ -34,16 +32,26 @@ function resizeActorCanvas() {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   actorCanvas.width = Math.max(1, Math.round(rect.width * dpr));
   actorCanvas.height = Math.max(1, Math.round(rect.height * dpr));
+  actorCanvas.style.width = `${rect.width}px`;
+  actorCanvas.style.height = `${rect.height}px`;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.imageSmoothingEnabled = false;
 }
 
-// The supplied 512x384 knight sheet is kept as-is.
-// Row 1: 6 standing/idle poses
-// Row 2: 8 walking poses
-const knightSheet = new Image();
-knightSheet.src = './assets/knight-sheet.png';
+function resizeWorld() {
+  world.style.aspectRatio = '16 / 9';
+  resizeActorCanvas();
+}
+window.addEventListener('resize', resizeWorld);
 
+// --------------------------------------------------
+// Knight sprite sheet
+// --------------------------------------------------
+const knightSheet = new Image();
+knightSheet.decoding = 'async';
+knightSheet.src = './assets/knight-sheet.png?v=2';
+
+// Exact frame regions from the supplied 512x384 sprite sheet.
 const IDLE_FRAMES = [
   { x: 7, y: 6, w: 49, h: 84 },
   { x: 69, y: 6, w: 53, h: 84 },
@@ -78,9 +86,9 @@ const player = {
 };
 
 const keys = new Set();
-const WALK_SPEED = 0.27;       // world-widths per second
+const WALK_SPEED = 0.27;
 const GROUND_Y = 0.78;
-const GRAVITY = 1.85;          // world-heights per second squared
+const GRAVITY = 1.85;
 const JUMP_VELOCITY = -0.72;
 const ACCELERATION = 7.5;
 const DECELERATION = 10.0;
@@ -97,6 +105,8 @@ window.addEventListener('keydown', (event) => {
       player.vy = JUMP_VELOCITY;
       player.onGround = false;
       player.state = 'jump';
+      player.frame = 0;
+      player.frameTimer = 0;
     }
   }
 });
@@ -147,15 +157,10 @@ function updatePlayer(dt) {
     player.state = 'idle';
   }
 
+  if (player.state === 'jump' || player.state === 'fall') return;
+
   const frames = player.state === 'walk' ? WALK_FRAMES : IDLE_FRAMES;
   const frameTime = player.state === 'walk' ? WALK_FRAME_TIME : IDLE_FRAME_TIME;
-
-  if (player.state === 'jump' || player.state === 'fall') {
-    player.frame = 0;
-    player.frameTimer = 0;
-    return;
-  }
-
   player.frameTimer += dt;
   while (player.frameTimer >= frameTime) {
     player.frameTimer -= frameTime;
@@ -164,23 +169,26 @@ function updatePlayer(dt) {
 }
 
 function drawKnight() {
-  if (!knightSheet.complete || !knightSheet.naturalWidth) return;
-
   const width = world.clientWidth;
   const height = world.clientHeight;
+  if (!width || !height) return;
+
+  ctx.clearRect(0, 0, width, height);
+  if (!knightSheet.complete || !knightSheet.naturalWidth) return;
+
   const frames = player.state === 'walk' ? WALK_FRAMES : IDLE_FRAMES;
   const frame = frames[player.frame % frames.length];
 
-  // Keep the feet locked to the same world-space anchor on every frame.
-  const pixelScale = Math.max(1, Math.floor(Math.min(width / 960, height / 540) * 1.35));
-  const drawScale = Math.max(2, pixelScale);
+  // Stable foot anchor. Character height is about 19% of the world height.
+  const targetHeight = Math.max(96, Math.min(210, height * 0.19));
+  const drawScale = targetHeight / frame.h;
   const dw = frame.w * drawScale;
   const dh = frame.h * drawScale;
   const dx = player.x * width - dw / 2;
   const dy = player.y * height - dh;
 
-  ctx.clearRect(0, 0, width, height);
   ctx.save();
+  ctx.imageSmoothingEnabled = false;
 
   if (player.direction < 0) {
     ctx.translate(dx + dw, 0);
@@ -193,16 +201,19 @@ function drawKnight() {
   ctx.restore();
 }
 
+knightSheet.addEventListener('load', drawKnight);
+knightSheet.addEventListener('error', () => {
+  console.error('Knight sprite failed to load:', knightSheet.src);
+});
+
 let lastTime = performance.now();
 function gameLoop(now) {
   const dt = Math.min((now - lastTime) / 1000, 0.033);
   lastTime = now;
-
   updatePlayer(dt);
   drawKnight();
   requestAnimationFrame(gameLoop);
 }
 
-knightSheet.addEventListener('load', drawKnight);
 resizeWorld();
 requestAnimationFrame(gameLoop);
