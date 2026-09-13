@@ -1,65 +1,52 @@
 // CUTTING RHYTHM - Knight movement prototype
-// Existing background code is intentionally left untouched.
+// Background implementation is intentionally untouched.
 
 const world = document.querySelector('.game-world');
 const actorsLayer = document.querySelector('#actors-layer');
 
-// Knight actor is rendered above the existing background.
-const actorCanvas = document.createElement('canvas');
-actorCanvas.id = 'knight-actor-canvas';
-Object.assign(actorCanvas.style, {
-  position: 'absolute', left: '0', top: '0', width: '100%', height: '100%',
-  display: 'block', pointerEvents: 'none', imageRendering: 'pixelated', zIndex: '20'
+// Put the character on a dedicated layer that is always above the background.
+actorsLayer.style.zIndex = '100';
+actorsLayer.style.position = 'absolute';
+actorsLayer.style.inset = '0';
+p
+
+const knight = document.createElement('div');
+knight.id = 'knight-actor';
+Object.assign(knight.style, {
+  position: 'absolute',
+  display: 'block',
+  overflow: 'hidden',
+  pointerEvents: 'none',
+  zIndex: '101',
+  transformOrigin: 'bottom center'
 });
-actorsLayer.style.zIndex = '20';
-actorsLayer.appendChild(actorCanvas);
 
-const ctx = actorCanvas.getContext('2d');
-ctx.imageSmoothingEnabled = false;
+const knightImage = document.createElement('img');
+knightImage.alt = '';
+knightImage.draggable = false;
+Object.assign(knightImage.style, {
+  position: 'absolute',
+  display: 'block',
+  maxWidth: 'none',
+  maxHeight: 'none',
+  imageRendering: 'pixelated',
+  userSelect: 'none',
+  pointerEvents: 'none'
+});
 
-function resizeActorCanvas() {
-  const rect = world.getBoundingClientRect();
-  const dpr = Math.min(window.devicePixelRatio || 1, 2);
-  actorCanvas.width = Math.max(1, Math.round(rect.width * dpr));
-  actorCanvas.height = Math.max(1, Math.round(rect.height * dpr));
-  actorCanvas.style.width = `${rect.width}px`;
-  actorCanvas.style.height = `${rect.height}px`;
-  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.imageSmoothingEnabled = false;
-}
-window.addEventListener('resize', resizeActorCanvas);
+knight.appendChild(knightImage);
+actorsLayer.appendChild(knight);
 
-// The new knight sheet is the 1536x1024 sheet uploaded to the repository root.
-// It is arranged as 8 columns x 4 rows (the last row is unused/empty).
-const knightSheet = new Image();
-knightSheet.decoding = 'async';
-knightSheet.src = './knight-sheet.png?v=6';
-
+// The user's new 1536x1024 knight sheet is 8 columns x 4 cells.
+// The visible character poses occupy rows 0-2.
+const SHEET_URL = './knight-sheet.png?v=7';
 const CELL_W = 192;
 const CELL_H = 256;
-const SHEET_COLS = 8;
+const COLS = 8;
 
-// Row 0: side-view movement frames. Used for A/D movement.
-const WALK_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
-  x: col * CELL_W, y: 0, w: CELL_W, h: CELL_H
-}));
-
-// Row 0 first pose is also a stable side-view idle pose.
-const IDLE_FRAME = { x: 0, y: 0, w: CELL_W, h: CELL_H };
-
-// Row 1: front-facing poses. Used during jumping so the character has a distinct
-// non-walking pose instead of freezing a walking frame.
-const JUMP_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
-  x: col * CELL_W, y: CELL_H, w: CELL_W, h: CELL_H
-}));
-
-// Row 2: back-facing poses. Kept ready for future 8-direction controls.
-const BACK_FRAMES = Array.from({ length: SHEET_COLS }, (_, col) => ({
-  x: col * CELL_W, y: CELL_H * 2, w: CELL_W, h: CELL_H
-}));
+knightImage.src = SHEET_URL;
 
 const player = {
-  // Starting position matches the bridge location from the reference screenshot.
   x: 0.26,
   y: 0.947,
   vx: 0,
@@ -79,7 +66,6 @@ const JUMP_VELOCITY = -0.72;
 const ACCELERATION = 7.5;
 const DECELERATION = 10.0;
 const WALK_FRAME_TIME = 0.095;
-const IDLE_FRAME_TIME = 0.22;
 const JUMP_FRAME_TIME = 0.12;
 const keys = new Set();
 
@@ -145,20 +131,17 @@ function updatePlayer(dt) {
     player.frameTimer += dt;
     while (player.frameTimer >= WALK_FRAME_TIME) {
       player.frameTimer -= WALK_FRAME_TIME;
-      player.frame = (player.frame + 1) % WALK_FRAMES.length;
+      player.frame = (player.frame + 1) % COLS;
     }
-  } else if (player.state === 'idle') {
-    player.frameTimer += dt;
-    while (player.frameTimer >= IDLE_FRAME_TIME) {
-      player.frameTimer -= IDLE_FRAME_TIME;
-      player.frame = 0;
-    }
-  } else {
+  } else if (player.state === 'jump' || player.state === 'fall') {
     player.frameTimer += dt;
     while (player.frameTimer >= JUMP_FRAME_TIME) {
       player.frameTimer -= JUMP_FRAME_TIME;
-      player.frame = Math.min(player.frame + 1, JUMP_FRAMES.length - 1);
+      player.frame = Math.min(player.frame + 1, COLS - 1);
     }
+  } else {
+    player.frame = 0;
+    player.frameTimer = 0;
   }
 }
 
@@ -167,38 +150,42 @@ function drawKnight() {
   const height = world.clientHeight;
   if (!width || !height) return;
 
-  ctx.clearRect(0, 0, width, height);
-  if (!knightSheet.complete || !knightSheet.naturalWidth) return;
+  // Make the knight large enough to be clearly visible on the bridge.
+  const targetHeight = Math.max(155, Math.min(225, height * 0.24));
+  const scale = targetHeight / CELL_H;
+  const spriteW = CELL_W * scale;
+  const spriteH = CELL_H * scale;
 
-  let frame;
-  if (player.state === 'walk') frame = WALK_FRAMES[player.frame % WALK_FRAMES.length];
-  else if (player.state === 'jump' || player.state === 'fall') frame = JUMP_FRAMES[player.frame % JUMP_FRAMES.length];
-  else frame = IDLE_FRAME;
+  const left = player.x * width - spriteW / 2;
+  const top = player.y * height - spriteH;
 
-  // The artwork occupies most of each 192x256 cell. Keep the foot anchor stable.
-  const targetHeight = Math.max(150, Math.min(205, height * 0.22));
-  const scale = targetHeight / frame.h;
-  const dw = frame.w * scale;
-  const dh = frame.h * scale;
-  const dx = player.x * width - dw / 2;
-  const dy = player.y * height - dh;
+  knight.style.width = `${spriteW}px`;
+  knight.style.height = `${spriteH}px`;
+  knight.style.left = `${left}px`;
+  knight.style.top = `${top}px`;
 
-  ctx.save();
-  ctx.imageSmoothingEnabled = false;
+  // Crop one 192x256 cell from the full sheet.
+  knightImage.style.width = `${1536 * scale}px`;
+  knightImage.style.height = `${1024 * scale}px`;
+  knightImage.style.left = `${-(player.frame * CELL_W * scale)}px`;
 
-  if (player.direction < 0) {
-    ctx.translate(dx + dw, 0);
-    ctx.scale(-1, 1);
-    ctx.drawImage(knightSheet, frame.x, frame.y, frame.w, frame.h, 0, dy, dw, dh);
-  } else {
-    ctx.drawImage(knightSheet, frame.x, frame.y, frame.w, frame.h, dx, dy, dw, dh);
-  }
-
-  ctx.restore();
+  const row = (player.state === 'jump' || player.state === 'fall') ? 1 : 0;
+  knightImage.style.top = `${-(row * CELL_H * scale)}px`;
+  knightImage.style.transform = player.direction < 0 ? 'scaleX(-1)' : 'scaleX(1)';
+  knightImage.style.transformOrigin = 'center center';
 }
 
-knightSheet.addEventListener('load', drawKnight);
-knightSheet.addEventListener('error', () => console.error('Knight sprite failed to load:', knightSheet.src));
+knightImage.addEventListener('error', () => {
+  console.error('Knight sprite failed to load:', SHEET_URL);
+  knight.textContent = 'KNIGHT IMAGE ERROR';
+  knight.style.color = 'white';
+  knight.style.font = 'bold 14px sans-serif';
+});
+
+function resize() {
+  drawKnight();
+}
+window.addEventListener('resize', resize);
 
 let lastTime = performance.now();
 function gameLoop(now) {
@@ -209,5 +196,6 @@ function gameLoop(now) {
   requestAnimationFrame(gameLoop);
 }
 
-resizeActorCanvas();
+// Draw immediately, then keep the physics/animation loop running.
+drawKnight();
 requestAnimationFrame(gameLoop);
