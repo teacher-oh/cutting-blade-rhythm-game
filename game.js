@@ -8,7 +8,6 @@ const actorsLayer = document.querySelector('#actors-layer');
 actorsLayer.style.zIndex = '100';
 actorsLayer.style.position = 'absolute';
 actorsLayer.style.inset = '0';
-p
 
 const knight = document.createElement('div');
 knight.id = 'knight-actor';
@@ -39,7 +38,7 @@ actorsLayer.appendChild(knight);
 
 // The user's new 1536x1024 knight sheet is 8 columns x 4 cells.
 // The visible character poses occupy rows 0-2.
-const SHEET_URL = './knight-sheet.png?v=7';
+const SHEET_URL = './knight-sheet.png?v=8';
 const CELL_W = 192;
 const CELL_H = 256;
 const COLS = 8;
@@ -182,10 +181,9 @@ knightImage.addEventListener('error', () => {
   knight.style.font = 'bold 14px sans-serif';
 });
 
-function resize() {
-  drawKnight();
-}
-window.addEventListener('resize', resize);
+window.addEventListener('resize', drawKnight);
+
+drawKnight();
 
 let lastTime = performance.now();
 function gameLoop(now) {
@@ -196,6 +194,4 @@ function gameLoop(now) {
   requestAnimationFrame(gameLoop);
 }
 
-// Draw immediately, then keep the physics/animation loop running.
-drawKnight();
 requestAnimationFrame(gameLoop);
