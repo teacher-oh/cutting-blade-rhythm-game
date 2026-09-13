@@ -39,7 +39,6 @@ function resizeActorCanvas() {
 }
 
 function resizeWorld() {
-  world.style.aspectRatio = '16 / 9';
   resizeActorCanvas();
 }
 window.addEventListener('resize', resizeWorld);
@@ -49,7 +48,7 @@ window.addEventListener('resize', resizeWorld);
 // --------------------------------------------------
 const knightSheet = new Image();
 knightSheet.decoding = 'async';
-knightSheet.src = './assets/knight-sheet.png?v=2';
+knightSheet.src = './assets/knight-sheet.png?v=3';
 
 // Exact frame regions from the supplied 512x384 sprite sheet.
 const IDLE_FRAMES = [
@@ -73,8 +72,10 @@ const WALK_FRAMES = [
 ];
 
 const player = {
-  x: 0.50,
-  y: 0.78,
+  // Starting position matches the red guide in the supplied screenshot:
+  // left side of the foreground bridge, with feet planted on the bridge.
+  x: 0.262,
+  y: 0.958,
   vx: 0,
   vy: 0,
   direction: 1,
@@ -87,7 +88,7 @@ const player = {
 
 const keys = new Set();
 const WALK_SPEED = 0.27;
-const GROUND_Y = 0.78;
+const GROUND_Y = 0.958;
 const GRAVITY = 1.85;
 const JUMP_VELOCITY = -0.72;
 const ACCELERATION = 7.5;
@@ -179,8 +180,8 @@ function drawKnight() {
   const frames = player.state === 'walk' ? WALK_FRAMES : IDLE_FRAMES;
   const frame = frames[player.frame % frames.length];
 
-  // Stable foot anchor. Character height is about 19% of the world height.
-  const targetHeight = Math.max(96, Math.min(210, height * 0.19));
+  // Match the approximate size of the red guide while keeping the foot anchor stable.
+  const targetHeight = Math.max(120, Math.min(210, height * 0.195));
   const drawScale = targetHeight / frame.h;
   const dw = frame.w * drawScale;
   const dh = frame.h * drawScale;
